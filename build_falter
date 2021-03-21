@@ -53,6 +53,9 @@ Options:
   -d|--development
     use development-feeds instead of release-feeds
 
+  -i|--image-builder
+    use custom image-builder instead of standart-openwrt ones.
+
 " >&2
 }
 
@@ -154,6 +157,18 @@ while :; do
       l*|-list-routers)
       PARSER_LIST_ROUTERS="y"
       ;;
+    
+    i*|-image-builder)
+      if [ "$2" ]; then
+        echo "Use Custom Imagebuilder at: $2"
+        IMAGE_BUILDER_PATH="$2"
+        shift
+      else
+        echo "Custom Imagebuilder parameters incomplete!" >&2
+        print_usage
+        exit 1
+      fi
+    ;;
 
     h*|\?*|-help)
       print_usage
@@ -277,24 +292,34 @@ function generate_embedded_files {
 }
 
 function start_build {
-    IMAGE_BUILDER_URL=$1
+    # use local imagebuilder if it was given
+    if [ -n $IMAGE_BUILDER_PATH ]; then
+      IMAGE_BUILDER_URL=$IMAGE_BUILDER_PATH
+    else
+      IMAGE_BUILDER_URL=$1
+    fi
     local TMP=$2 # slice packageset-name from path
     local PKG_SET=$(echo $TMP | rev | cut -d'/' -f1 | rev | cut -d'.' -f1)
     local DEVICE=$3
     FILENAME=$(basename $IMAGE_BUILDER_URL)
     FOLDERNAME=$(basename $FILENAME .tar.xz)
     BRANCH=$(derive_branch_from_url $IMAGE_BUILDER_URL)
+    [ -z $BRANCH ] && BRANCH="snapshot"
     echo "building using: $IMAGE_BUILDER_URL"
     echo "selected branch: $BRANCH"
 
-    # store imagebuilders in cache. Reload, if there is a newer version avaiable
-    local CACHE="../imagebuilder_cache"
-    if [ ! -d $CACHE ]; then mkdir -p $CACHE; fi
-    cd $CACHE
-    wget -N --no-if-modified-since $IMAGE_BUILDER_URL
-    cd ../build
-    # pull imagebuilder from cache-dir
-    cp ../imagebuilder_cache/$FILENAME $FILENAME
+    if [ -z $IMAGE_BUILDER_PATH ]; then
+      # store imagebuilders in cache. Reload, if there is a newer version avaiable
+      local CACHE="../imagebuilder_cache"
+      if [ ! -d $CACHE ]; then mkdir -p $CACHE; fi
+      cd $CACHE
+      wget -N --no-if-modified-since $IMAGE_BUILDER_URL
+      cd ../build
+      # pull imagebuilder from cache-dir
+      cp ../imagebuilder_cache/$FILENAME $FILENAME
+    else
+      cp ../$IMAGE_BUILDER_PATH $FILENAME
+    fi
 
     echo $PWD
 
@@ -330,6 +355,7 @@ function start_build {
     # the hexadecimal number represents the fringerprint of the key. Refer to third section of https://openwrt.org/docs/guide-user/security/keygen#generate_usign_key_pair
     local URL="http://buildbot.berlin.freifunk.net/buildbot/feed/packagefeed_master.pub"
     echo "loading package-feed key from $URL"
+    mkdir -p keys
     curl "$URL" > keys/61a078a38408e710
 
     generate_embedded_files $BRANCH
